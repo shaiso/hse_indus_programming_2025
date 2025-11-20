@@ -6,3 +6,9 @@ __pycache__/
 .idea/
 .vscode/
 .pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+allure-results/
+allure-report/
