@@ -12,3 +12,6 @@ coverage.xml
 htmlcov/
 allure-results/
 allure-report/
+
+# LikeC4 generated artifacts
+Homework_03/docs/diagrams.json

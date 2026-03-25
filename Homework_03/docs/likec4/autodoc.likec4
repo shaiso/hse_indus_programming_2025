@@ -1,0 +1,139 @@
+specification {
+  element actor {
+    style {
+      shape person
+      color amber
+    }
+  }
+  element system {
+    style {
+      color sky
+    }
+  }
+  element external_system {
+    style {
+      color slate
+    }
+  }
+  element container {
+    style {
+      color blue
+    }
+  }
+  element component {
+    style {
+      color indigo
+    }
+  }
+}
+
+model {
+  actor developer 'Backend-разработчик' {
+    description 'Отправляет исходный код сервиса для генерации документации'
+  }
+
+  actor devops 'DevOps-инженер' {
+    description 'Мониторит состояние сервиса'
+  }
+
+  system autodoc 'AutoDoc API' {
+    description 'Сервис автоматической генерации OpenAPI-спецификации из исходного кода'
+
+    container app 'Go Application' {
+      description 'Единый Go-бинарник: HTTP-сервер, бизнес-логика, интеграция с LLM'
+      technology 'Go, Gin'
+
+      component handler 'HTTP Handlers' {
+        description 'Принимают HTTP-запросы, валидируют входные данные, формируют ответ'
+        technology 'Go, Gin'
+      }
+
+      component middleware 'Middleware' {
+        description 'Логирование, CORS, rate limiting, panic recovery'
+        technology 'Go, Gin'
+      }
+
+      component analyzer 'Analyzer Service' {
+        description 'Оркестрирует процесс: парсинг кода → вызов LLM → сборка спецификации'
+        technology 'Go'
+      }
+
+      component parser 'Code Parser' {
+        description 'Определяет язык/фреймворк, извлекает релевантные фрагменты (роуты, хендлеры, модели)'
+        technology 'Go'
+      }
+
+      component llm_client 'LLM Client' {
+        description 'Формирует промпты, вызывает LLM API, парсит ответ. Абстракция позволяет сменить провайдера'
+        technology 'Go'
+      }
+
+      component spec_builder 'Spec Builder' {
+        description 'Валидирует сгенерированную спеку по стандарту OpenAPI 3.0, форматирует в YAML/JSON'
+        technology 'Go'
+      }
+    }
+  }
+
+  external_system llm_provider 'LLM Provider (OpenAI)' {
+    description 'Внешний LLM API (GPT-4.1-mini) для анализа кода и генерации спецификаций'
+  }
+
+  // ── Level 1: System Context ──
+  developer -> autodoc 'Отправляет исходный код через REST API'
+  devops -> autodoc 'Проверяет health check'
+  autodoc -> llm_provider 'Отправляет код для анализа'
+
+  // ── Level 2: Container ──
+  autodoc.app -> llm_provider 'HTTP-запрос к OpenAI API'
+
+  // ── Level 3: Components ──
+  autodoc.app.middleware -> autodoc.app.handler 'Пропускает запрос'
+  autodoc.app.handler -> autodoc.app.analyzer 'Вызывает анализ'
+  autodoc.app.analyzer -> autodoc.app.parser 'Передает файлы для парсинга'
+  autodoc.app.analyzer -> autodoc.app.llm_client 'Отправляет подготовленный промпт'
+  autodoc.app.analyzer -> autodoc.app.spec_builder 'Передает ответ LLM для сборки'
+  autodoc.app.llm_client -> llm_provider 'POST /v1/chat/completions'
+}
+
+views {
+  // Level 1: System Context — AutoDoc как чёрный ящик, только внешние связи
+  view context {
+    title 'AutoDoc API — System Context (C4 Level 1)'
+    description 'Кто использует систему и с какими внешними системами она взаимодействует'
+
+    include developer
+    include devops
+    include autodoc
+    include llm_provider
+
+    include developer -> autodoc
+    include devops -> autodoc
+    include autodoc -> llm_provider
+  }
+
+  // Level 2: Containers — заглядываем внутрь AutoDoc, видим деплоящиеся единицы
+  view containers of autodoc {
+    title 'AutoDoc API — Containers (C4 Level 2)'
+    description 'Внутренняя структура: один Go-бинарник взаимодействует с внешним LLM API'
+
+    include *
+    include developer
+    include devops
+    include llm_provider
+
+    include developer -> autodoc
+    include devops -> autodoc
+    include autodoc.app -> llm_provider
+  }
+
+  // Level 3: Components — заглядываем внутрь Go Application, видим компоненты
+  view components of autodoc.app {
+    title 'Go Application — Components (C4 Level 3)'
+    description 'Внутренние компоненты единого Go-приложения'
+
+    include *
+    include llm_provider
+    include autodoc.app.llm_client -> llm_provider
+  }
+}
