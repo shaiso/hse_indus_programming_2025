@@ -13,5 +13,8 @@ htmlcov/
 allure-results/
 allure-report/
 
+GPU_Deploy_Report/speech_notes.md
+
 # LikeC4 generated artifacts
 Homework_03/docs/diagrams.json
+GPU_Deploy_Report/venv/

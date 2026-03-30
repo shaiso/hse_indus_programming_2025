@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resnet-inference
+  namespace: ml-production
+  labels:
+    app: resnet-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: resnet-inference
+  # Rolling Update: обновляем поды по одному, без простоя
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # +1 под на время обновления (нужен 1 доп. GPU)
+      maxUnavailable: 0     # не убивать старый под, пока новый не готов
+  template:
+    metadata:
+      labels:
+        app: resnet-inference
+    spec:
+      # Toleration: разрешаем размещение на GPU-нодах (помечены taint)
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      # Предпочитаем ноды с A100/H100, но подойдёт любая GPU-нода
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+                      - NVIDIA-H100-SXM5-80GB
+
+      containers:
+        - name: model-server
+          image: myregistry.com/resnet-inference:v1
+          ports:
+            - containerPort: 8080
+              name: http
+
+          # Конфигурация из ConfigMap
+          envFrom:
+            - configMapRef:
+                name: model-config
+
+          # GPU и ресурсы
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+              nvidia.com/gpu: 1      # 1 GPU (requests = limits обязательно)
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+              nvidia.com/gpu: 1
+
+          # Startup Probe: модель грузится долго — даём до 5 минут
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 30     # 30 × 10s = 300s максимум на старт
+            periodSeconds: 10
+
+          # Readiness Probe: не отправлять трафик, пока модель не загружена
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          # Liveness Probe: перезапустить зависший под
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 5
+
+      # Graceful shutdown: дать 60 секунд на завершение текущих запросов
+      terminationGracePeriodSeconds: 60

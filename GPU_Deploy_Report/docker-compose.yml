@@ -1,0 +1,22 @@
+services:
+  model-server:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - MAX_BATCH_SIZE=8
+      - MAX_WAIT_MS=50
+    # GPU-поддержка: раскомментировать на машине с NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
