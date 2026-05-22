@@ -1,0 +1,30 @@
+services:
+  autodoc-api:
+    build:
+      context: .
+      args:
+        VERSION: "0.1.0"
+        COMMIT: "${GIT_COMMIT:-dev}"
+    image: autodoc-api:latest
+    container_name: autodoc-api
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      PORT: "8080"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LLM_MODEL: "${LLM_MODEL:-gpt-4.1-mini}"
+      LLM_FALLBACK_MODEL: "${LLM_FALLBACK_MODEL:-gpt-4.1}"
+      LLM_TIMEOUT: "${LLM_TIMEOUT:-60s}"
+      MAX_REQUEST_BYTES: "${MAX_REQUEST_BYTES:-2097152}"
+      MAX_FILES: "${MAX_FILES:-100}"
+      RATE_LIMIT_PER_MIN: "${RATE_LIMIT_PER_MIN:-60}"
+      USE_MOCK_LLM: "${USE_MOCK_LLM:-false}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

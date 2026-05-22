@@ -22,61 +22,42 @@ AutoDoc API принимает исходный код сервиса и с по
 
 ## Стек технологий
 
-- **Язык:** Go
-- **HTTP-фреймворк:** Gin
+- **Язык:** Go (1.25)
+- **HTTP:** стандартная библиотека `net/http` 
 - **LLM:** OpenAI API (GPT-4.1-mini) — основная модель; GPT-4.1 — fallback для сложных случаев
 - **Контейнеризация:** Docker, docker-compose
-- **Тестирование:** стандартный пакет `testing` + testify
+- **Тестирование:** стандартный пакет `testing` + `net/http/httptest`
 - **Линтер:** golangci-lint
 
-## Архитектура
-
-Проект — единый Go-бинарник, построенный по принципу чистой архитектуры с разделением на компоненты:
-
-```
-                    ┌───────────────────────────────────┐
-                    │           Go Application          │
-                    │                                   │
-  HTTP Request ───▶ │  Middleware → HTTP Handlers       │
-                    │                  │                │
-                    │            Analyzer Service       │
-                    │           /       |       \       │
-                    │     Parser    LLM Client   Spec   │
-                    │                  │        Builder │
-                    └──────────────────│────────────────┘
-                                       │
-                                       ▼
-                              ┌─────────────────┐
-                              │  OpenAI API     │
-                              │  (GPT-4.1-mini) │
-                              └─────────────────┘
-```
-
-- **Middleware** — логирование, CORS, rate limiting, panic recovery
-- **HTTP Handlers** — приём запросов, валидация, формирование ответа
-- **Analyzer Service** — оркестрация: парсинг → LLM → сборка спеки
-- **Code Parser** — определение языка/фреймворка, извлечение релевантных фрагментов
-- **LLM Client** — формирование промптов, вызов OpenAI API, парсинг ответа
-- **Spec Builder** — валидация OpenAPI 3.0 и форматирование в YAML/JSON
-
-Подробная C4-диаграмма (3 уровня) — см. `docs/likec4/`.
 
 ## Запуск
 
 ### Переменные окружения
 
-| Переменная | Описание | Обязательная |
-|---|---|---|
-| `OPENAI_API_KEY` | API-ключ OpenAI | Да |
-| `PORT` | Порт сервера (по умолчанию 8080) | Нет |
-| `LLM_MODEL` | Модель OpenAI (по умолчанию gpt-4.1-mini) | Нет |
-| `LLM_FALLBACK_MODEL` | Fallback-модель (по умолчанию gpt-4.1) | Нет |
-| `LOG_LEVEL` | Уровень логирования (по умолчанию info) | Нет |
+| Переменная | Описание | По умолчанию | Обязательная |
+|---|---|---|---|
+| `OPENAI_API_KEY` | API-ключ OpenAI (или совместимого провайдера) | — | Да (если `USE_MOCK_LLM=false`) |
+| `OPENAI_BASE_URL` | Базовый URL OpenAI-совместимого API. Пусто = `https://api.openai.com/v1`. Пример: `https://api.aitunnel.ru/v1` | пусто | Нет |
+| `PORT` | Порт сервера | `8080` | Нет |
+| `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` | Нет |
+| `LLM_MODEL` | Основная модель OpenAI | `gpt-4.1-mini` | Нет |
+| `LLM_FALLBACK_MODEL` | Fallback-модель | `gpt-4.1` | Нет |
+| `LLM_TIMEOUT` | Таймаут вызова LLM | `60s` | Нет |
+| `MAX_REQUEST_BYTES` | Лимит размера тела запроса | `2097152` (2 MB) | Нет |
+| `MAX_FILES` | Лимит файлов в запросе | `100` | Нет |
+| `RATE_LIMIT_PER_MIN` | Per-IP rate limit | `60` | Нет |
+| `USE_MOCK_LLM` | Включить mock-LLM (для тестов) | `false` | Нет |
+
+См. `.env.example`.
 
 ### Docker
 
 ```bash
-docker-compose up --build
+# с реальной моделью:
+OPENAI_API_KEY=sk-... docker-compose up --build
+
+# в mock-режиме (без ключа):
+USE_MOCK_LLM=true docker-compose up --build
 ```
 
 ### Локально
@@ -84,6 +65,13 @@ docker-compose up --build
 ```bash
 export OPENAI_API_KEY=sk-...
 go run ./cmd/server
+# или: make run
+```
+
+### Mock-режим без ключа
+
+```bash
+USE_MOCK_LLM=true go run ./cmd/server
 ```
 
 ## API
@@ -96,42 +84,187 @@ go run ./cmd/server
 ```json
 {
   "files": [
-    {
-      "name": "main.go",
-      "content": "package main\n\nimport ..."
-    }
+    {"name": "main.go", "content": "package main\n\nimport ..."}
   ],
   "language": "go",
   "format": "yaml"
 }
 ```
 
-**Response:**
+**Response 200:**
 ```json
 {
-  "spec": "openapi: 3.0.0\ninfo:\n  title: ...",
-  "summary": "Обнаружено 5 эндпоинтов: ...",
+  "spec": "openapi: 3.0.3\ninfo: ...",
+  "summary": "Items Service — detected 5 endpoint(s)",
   "endpoints_count": 5,
-  "format": "yaml"
+  "format": "yaml",
+  "language": "go",
+  "framework": "gin",
+  "model": "gpt-4.1-mini",
+  "used_fallback": false,
+  "retried_spec": false,
+  "tokens_used": {"input": 1500, "output": 800},
+  "latency": {"total_ms": 5300, "parser_ms": 1, "llm_ms": 5285, "spec_ms": 14}
 }
 ```
 
+**Коды ошибок:**
+
+| Код | Когда |
+|---|---|
+| 400 | пустой/некорректный input |
+| 413 | превышен `MAX_FILES` или `MAX_REQUEST_BYTES` |
+| 422 | невалидный JSON, формат не yaml/json или неподдерживаемый язык |
+| 429 | rate limit |
+| 502 | ошибка LLM или невалидная спека после retry |
+| 504 | LLM-таймаут |
+
 ### `GET /api/v1/health`
 
-Проверка состояния сервиса.
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "commit": "dev",
+  "llm": {"reachable": true, "model": "gpt-4.1-mini"}
+}
+```
+
+LLM-проба кешируется на 30 секунд.
+
+## Использование
+
+Сценарий: собрать тело запроса из файлов с кодом, отправить на `/api/v1/analyze`
+и получить спецификацию. Команды выполняются из корня проекта; нужен `jq`
+(`brew install jq`).
+
+### 1. Поднять сервис и проверить здоровье
+
+```bash
+docker compose up --build -d
+curl -s http://localhost:8080/api/v1/health | jq
+```
+
+`llm.reachable: true` означает, что ключ доехал и провайдер отвечает.
+Локальный запуск см. в разделе «Запуск».
+
+### 2. Собрать тело запроса
+
+Содержимое исходника нужно завернуть в JSON-строку с экранированием — это делает
+`jq --rawfile` (читает файл как сырой текст в переменную):
+
+```bash
+jq -n --rawfile main examples/go_gin_api/main.go \
+  '{language:"go", format:"yaml",
+    files:[{name:"main.go", content:$main}]}' \
+  > /tmp/payload.json
+```
+
+Несколько файлов — без ручного перечисления:
+
+```bash
+for f in examples/go_gin_api/main.go examples/go_gin_api/go.mod; do
+  jq -n --arg name "$(basename "$f")" --rawfile content "$f" \
+        '{name:$name, content:$content}'
+done | jq -s '{language:"go", format:"yaml", files: .}' > /tmp/payload.json
+```
+
+Поля: `language` можно опустить или указать `"auto"` (сработает автодетект);
+`format` — `yaml` или `json`. Поддерживаемые языки: `go`, `python`,
+`javascript`, `typescript`.
+
+### 3. Отправить и получить спеку
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/analyze \
+  -H 'Content-Type: application/json' \
+  --data @/tmp/payload.json | tee /tmp/resp.json | jq -r '.spec'
+```
+
+- `tee /tmp/resp.json` — сохраняет полный ответ и одновременно передаёт его дальше;
+- `jq -r '.spec'` — печатает только саму спецификацию.
+
+Запрос занимает ~5–25 секунд (ожидание ответа модели).
+
+### 4. Разобрать ответ
+
+Ответ — один JSON-объект (спека + метаданные). Полный ответ уже в `/tmp/resp.json`,
+поэтому метаданные смотрятся без повторного запроса:
+
+```bash
+jq 'del(.spec)' /tmp/resp.json    # всё, кроме спеки — метаданные
+jq '.endpoints_count, .framework, .latency' /tmp/resp.json
+```
+
+Для `examples/go_gin_api/main.go` ожидается `endpoints_count: 4`, пути `/users`
+и `/users/{id}`, схемы `User` / `CreateUserRequest` / `ErrorResponse`.
+
+### Остановить сервис
+
+```bash
+docker compose down
+```
 
 ## Пример входных данных
 
-В директории `examples/` находятся примеры исходного кода для тестирования:
-- `examples/go_gin_api/` — простой REST API на Go + Gin
-- `examples/python_fastapi/` — API на Python + FastAPI
-- `examples/express_api/` — API на Node.js + Express
+В `examples/`:
+- `examples/go_gin_api/` — Go + Gin (4 эндпоинта)
+- `examples/python_fastapi/` — Python + FastAPI (5 эндпоинтов)
+- `examples/express_api/` — Node.js + Express (4 эндпоинта)
+
+Каждый каталог содержит `expected_endpoints.json` с эталонной разметкой
+(используется в `tests/quality`).
 
 ## Тестирование
 
 ```bash
-go test ./... -v -cover
+make test          # все unit-тесты
+make test-race     # с race-детектором
+make cover         # покрытие, coverage.html
+
+# Нагрузочный замер (mock LLM):
+./scripts/load_test.sh 1000 15s
+
+# Качество против эталонов (нужен OPENAI_API_KEY):
+export OPENAI_API_KEY=sk-...
+./scripts/quality_eval.sh
 ```
+
+### Покрытие
+
+
+| Пакет | Coverage |
+|---|---|
+| `internal/parser` | 95.6% |
+| `internal/analyzer` | 90.0% |
+| `internal/spec` | 88.2% |
+| `internal/handler` | 79.7% |
+| `internal/config` | 79.5% |
+| `internal/middleware` | 55.7% |
+| `internal/llm` | 22.1% |
+
+`internal/middleware` покрывает unit-тестами `RequestID`, `RateLimit`, `RequestSizeLimit`;
+`Logger`/`Recovery` без отдельных тестов (они тривиальные и проверяются в e2e через handler-тесты).
+`internal/llm` низкое покрытие, потому что `openai.go` тестируется живым прогоном через
+`tests/quality/` (см. секцию "Метрики качества"), а не unit-тестами с моками сети.
+
+## Замеры производительности
+
+Полный отчёт — `docs/load_report.md`. Сводка mock-режима:
+
+| Target RPS | Actual | OK | Errors | P50 ms | P95 ms | P99 ms |
+|---|---|---|---|---|---|---|
+| 50 | 49.6 | 496 | 0 | 0.6 | 1.9 | 6.2 |
+| 200 | 199.3 | 2989 | 0 | 0.4 | 0.9 | 2.1 |
+| 500 | 494.7 | 7420 | 0 | 0.4 | 0.7 | 1.7 |
+| 1000 | 998.3 | 14974 | 0 | 0.3 | 0.6 | 0.9 |
+
+Серверный overhead — sub-ms на разумных RPS. Узкое место end-to-end —
+сам внешний LLM (5–25 секунд на запрос), что подтверждает декомпозиция
+`latency` в ответе.
+
+Качество (precision/recall) и реальный latency LLM считаются скриптом
+`./scripts/quality_eval.sh` — отчёт `docs/metrics.md`.
 
 ## Обоснование использования ML
 
@@ -199,10 +332,12 @@ go test ./... -v -cover
 
 ### Ограничения
 
-- Максимальный размер запроса — 50 файлов или 500 KB суммарно
+- Максимальный размер запроса — 100 файлов или 2 MB суммарно (по умолчанию;
+  настраивается через `MAX_FILES` и `MAX_REQUEST_BYTES`)
 - Поддерживаемые языки в MVP: Go, Python, JavaScript/TypeScript
 - Генерация только OpenAPI 3.0 (не Swagger 2.0, не AsyncAPI)
-- Требуется доступ к OpenAI API (не работает офлайн)
+- Требуется доступ к OpenAI-совместимому API (не работает офлайн).
+  Через `OPENAI_BASE_URL` можно указать proxy-провайдера (AiTunnel, OpenRouter и т.п.)
 
 ### Нефункциональные требования
 

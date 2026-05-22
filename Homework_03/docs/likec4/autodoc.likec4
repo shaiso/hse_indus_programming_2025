@@ -41,16 +41,16 @@ model {
 
     container app 'Go Application' {
       description 'Единый Go-бинарник: HTTP-сервер, бизнес-логика, интеграция с LLM'
-      technology 'Go, Gin'
+      technology 'Go, net/http (stdlib)'
 
       component handler 'HTTP Handlers' {
         description 'Принимают HTTP-запросы, валидируют входные данные, формируют ответ'
-        technology 'Go, Gin'
+        technology 'Go, net/http'
       }
 
       component middleware 'Middleware' {
-        description 'Логирование, CORS, rate limiting, panic recovery'
-        technology 'Go, Gin'
+        description 'Request ID, логирование, rate limiting, лимит размера тела, panic recovery'
+        technology 'Go, net/http'
       }
 
       component analyzer 'Analyzer Service' {

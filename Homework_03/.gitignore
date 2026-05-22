@@ -1,0 +1,6 @@
+bin/
+.env
+*.test
+.DS_Store
+.idea/
+presentation

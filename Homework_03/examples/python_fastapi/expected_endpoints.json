@@ -1,0 +1,9 @@
+{
+  "endpoints": [
+    {"method": "GET", "path": "/items"},
+    {"method": "GET", "path": "/items/{item_id}"},
+    {"method": "POST", "path": "/items"},
+    {"method": "PUT", "path": "/items/{item_id}"},
+    {"method": "DELETE", "path": "/items/{item_id}"}
+  ]
+}

@@ -1,0 +1,16 @@
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+bin
+coverage.out
+coverage.html
+*.test
+.env
+docs
+tests
+examples
+README.md
+Task.md
+Makefile
